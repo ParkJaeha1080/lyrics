@@ -130,12 +130,16 @@ textarea{width:100%;min-height:130px;padding:10px 12px;border:1px solid var(--li
   <details class="tools" id="tools">
     <summary>가사 파일이 없나요? 인터넷 검색 · 직접 싱크 찍기</summary>
 
-    <div class="sec">
-      <h3>인터넷에서 가사 찾기 (LRCLIB)</h3>
-      <div class="row">
+    <div class="sec" style="border-top:0">
+      <h3>곡 정보 (검색과 싱크 찍기에 함께 쓰여요)</h3>
+      <div class="row" style="margin-bottom:0">
         <div class="field"><label for="qTitle">곡 제목</label><input type="text" id="qTitle" autocomplete="off"></div>
         <div class="field"><label for="qArtist">아티스트</label><input type="text" id="qArtist" autocomplete="off"></div>
       </div>
+    </div>
+
+    <div class="sec">
+      <h3>인터넷에서 가사 찾기 (LRCLIB)</h3>
       <button class="btn sec block" id="searchBtn">가사 검색</button>
       <p class="status" id="searchStatus"></p>
       <div class="results" id="results"></div>
@@ -145,7 +149,10 @@ textarea{width:100%;min-height:130px;padding:10px 12px;border:1px solid var(--li
     <div class="sec">
       <h3>직접 싱크 찍기</h3>
       <div id="tapSetup">
-        <label class="lbl" for="lyricsText">가사 텍스트를 붙여넣어 주세요 (한 줄이 한 화면이 돼요)</label>
+        <button class="btn sec block" id="tapSearchBtn">위 곡 정보로 가사 검색해서 불러오기</button>
+        <p class="status" id="tapSearchStatus"></p>
+        <div class="results" id="results2"></div>
+        <label class="lbl" for="lyricsText" style="display:block;margin-top:10px">가사 텍스트 (검색한 가사가 여기 들어와요. 직접 붙여넣거나 고쳐도 돼요. 한 줄이 한 화면이 돼요)</label>
         <textarea id="lyricsText" placeholder="가사를 한 줄씩 붙여넣기"></textarea>
         <button class="btn block" id="tapStart" style="margin-top:10px">싱크 찍기 시작</button>
         <p class="note">곡이 재생되고, 각 줄이 시작되는 순간에 큰 버튼(또는 스페이스바)을 누르면 그 시간이 저장돼요. 손가락 반응 시간을 고려해서 0.1초 정도 앞당겨 기록해요. 끝나고 나서도 위의 가사 싱크 보정으로 조절할 수 있어요.</p>
@@ -1354,11 +1361,18 @@ $('fileLrc').addEventListener('change', () => setTimeout(() => { prefillSearch(m
 
 const searchMsg = (t, k) => { const el = $('searchStatus'); el.textContent = t || ''; el.className = 'status' + (k ? ' ' + k : ''); };
 
-async function searchLyrics() {
+const tapSearchMsg = (t, k) => { const el = $('tapSearchStatus'); el.textContent = t || ''; el.className = 'status' + (k ? ' ' + k : ''); };
+
+// mode 'lrc': load a synced .lrc straight into the video. mode 'plain': only fetch the lyric text for tap-syncing.
+async function searchLyrics(mode) {
+  mode = mode === 'plain' ? 'plain' : 'lrc';
+  const msg = mode === 'plain' ? tapSearchMsg : searchMsg;
+  const box = $(mode === 'plain' ? 'results2' : 'results');
+  $('results').innerHTML = ''; $('results2').innerHTML = '';
+  searchMsg(''); tapSearchMsg('');
   const title = $('qTitle').value.trim(), artist = $('qArtist').value.trim();
-  const box = $('results'); box.innerHTML = '';
-  if (!title) { searchMsg('곡 제목을 입력해 주세요.', 'err'); return; }
-  searchMsg('찾는 중이에요…');
+  if (!title) { msg('위의 곡 정보에서 곡 제목을 입력해 주세요.', 'err'); return; }
+  msg('찾는 중이에요…');
   let list = null;
   const run = async params => {
     const r = await fetch('https://lrclib.net/api/search?' + params.toString());
@@ -1370,38 +1384,46 @@ async function searchLyrics() {
     list = await run(p1);
     if (!list.length) list = await run(new URLSearchParams({ q: (artist ? artist + ' ' : '') + title }));
   } catch (e) {
-    searchMsg('인터넷 검색에 연결하지 못했어요. 이 게시 페이지는 보안상 외부 연결이 막혀 있어요. 페이지를 파일로 내려받아 열면 쓸 수 있고, 그래도 안 되면 lrclib.net에서 .lrc를 직접 받아 올려 주세요.', 'err');
+    msg('인터넷 검색에 연결하지 못했어요. 이 게시 페이지는 보안상 외부 연결이 막혀 있어요. 페이지를 파일로 내려받아 열면 쓸 수 있고, 그래도 안 되면 lrclib.net에서 가사를 직접 받아 올려 주세요.', 'err');
     return;
   }
-  if (!list || !list.length) { searchMsg('검색 결과가 없어요. 제목이나 아티스트를 바꿔 보세요.', 'err'); return; }
-  list = list.filter(x => !x.instrumental);
+  list = (list || []).filter(x => !x.instrumental && (mode === 'plain' ? (x.plainLyrics || x.syncedLyrics) : (x.syncedLyrics || x.plainLyrics)));
+  if (!list.length) { msg('검색 결과가 없어요. 제목이나 아티스트를 바꿔 보세요.', 'err'); return; }
   if (dur) list.sort((a, b) => Math.abs((a.duration || 0) - dur) - Math.abs((b.duration || 0) - dur));
   const synced = list.filter(x => x.syncedLyrics).length;
-  searchMsg(`결과 ${list.length}개 · 싱크 있는 가사 ${synced}개. 하나를 눌러 불러오세요.`, 'good');
+  msg(mode === 'plain' ? `결과 ${list.length}개. 가사를 가져올 곡을 눌러 주세요.` : `결과 ${list.length}개 · 싱크 있는 가사 ${synced}개. 하나를 눌러 불러오세요.`, 'good');
   list.slice(0, 15).forEach(x => {
     const b = document.createElement('button');
     const match = dur && Math.abs((x.duration || 0) - dur) <= 3;
-    b.className = match && x.syncedLyrics ? 'good' : '';
+    b.className = match && (mode === 'plain' || x.syncedLyrics) ? 'good' : '';
     b.appendChild(document.createTextNode(`${x.trackName || ''} — ${x.artistName || ''}`));
     const sm = document.createElement('small');
-    sm.textContent = `${x.albumName || '앨범 정보 없음'} · ${fmt(x.duration || 0)}` + (match ? ' · 길이 일치' : '') + (x.syncedLyrics ? ' · 싱크 있음' : ' · 싱크 없음(가사만 있음, 직접 싱크 찍기에 사용)');
+    sm.textContent = `${x.albumName || '앨범 정보 없음'} · ${fmt(x.duration || 0)}` + (match ? ' · 길이 일치' : '')
+      + (mode === 'plain' ? '' : (x.syncedLyrics ? ' · 싱크 있음' : ' · 싱크 없음(가사만 있음, 직접 싱크 찍기에 사용)'));
     b.appendChild(sm);
     b.addEventListener('click', () => {
-      if (x.syncedLyrics) {
+      if (mode === 'plain' || !x.syncedLyrics) {
+        const plain = x.plainLyrics || x.syncedLyrics.split(/\r?\n/).map(l => l.replace(/\[[^\]]*\]/g, '').replace(/<[^>]*>/g, '')).join('\n');
+        $('lyricsText').value = plain.split(/\r?\n/).map(l => l.trim()).filter(Boolean).join('\n');
+        if (!$('qTitle').value.trim()) $('qTitle').value = x.trackName || '';
+        if (!$('qArtist').value.trim()) $('qArtist').value = x.artistName || '';
+        if (!meta.ti) { $('titleIn').value = x.trackName || ''; $('artistIn').value = x.artistName || ''; }
+        $('results2').innerHTML = ''; $('results').innerHTML = '';
+        tapSearchMsg('가사를 불러왔어요. 아래에서 고친 뒤 "싱크 찍기 시작"을 눌러 박자에 맞게 찍어 보세요.', 'good');
+        if (mode === 'lrc') searchMsg('');
+        $('tapStart').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } else {
         const head = `[ti:${x.trackName || ''}]\n[ar:${x.artistName || ''}]\n[al:${x.albumName || ''}]\n`;
         applyLrcText(head + x.syncedLyrics, `LRCLIB · ${x.trackName || ''}`);
         searchMsg('가사를 불러왔어요. 아래 미리보기에서 확인하세요.', 'good');
-      } else if (x.plainLyrics) {
-        $('lyricsText').value = x.plainLyrics.split(/\r?\n/).map(l => l.trim()).filter(Boolean).join('\n');
-        if (!meta.ti) { $('titleIn').value = x.trackName || ''; $('artistIn').value = x.artistName || ''; }
-        searchMsg('싱크 없는 가사를 아래 칸에 넣었어요. "싱크 찍기 시작"을 눌러 직접 맞춰 보세요.', 'good');
       }
     });
     box.appendChild(b);
   });
 }
-$('searchBtn').addEventListener('click', searchLyrics);
-['qTitle', 'qArtist'].forEach(id => $(id).addEventListener('keydown', e => { if (e.key === 'Enter') searchLyrics(); }));
+$('searchBtn').addEventListener('click', () => searchLyrics('lrc'));
+$('tapSearchBtn').addEventListener('click', () => searchLyrics('plain'));
+['qTitle', 'qArtist'].forEach(id => $(id).addEventListener('keydown', e => { if (e.key === 'Enter') searchLyrics('lrc'); }));
 
 /* ---- tap sync ---- */
 const tap = { active: false, lines: [], idx: 0, stamps: [], lag: 0.12 };
