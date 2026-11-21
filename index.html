@@ -728,15 +728,32 @@ async function loadAudioFile(f) {
   }
 }
 
+// Korean LRC files are often EUC-KR (CP949) instead of UTF-8, so detect the encoding.
+async function readLrcText(f) {
+  const buf = new Uint8Array(await f.arrayBuffer());
+  if (buf[0] === 0xFF && buf[1] === 0xFE) return new TextDecoder('utf-16le').decode(buf.subarray(2));
+  if (buf[0] === 0xFE && buf[1] === 0xFF) return new TextDecoder('utf-16be').decode(buf.subarray(2));
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch (e) { /* not UTF-8 */ }
+  try {
+    const k = new TextDecoder('euc-kr').decode(buf);
+    const hangul = (k.match(/[\uAC00-\uD7A3]/g) || []).length, bad = (k.match(/\uFFFD/g) || []).length;
+    if (hangul >= 3 && bad < 3) { legacyEnc = 'CP949'; return k; }
+  } catch (e) { /* ignore */ }
+  try { return new TextDecoder('windows-1252').decode(buf); } catch (e) { return new TextDecoder().decode(buf); }
+}
+let legacyEnc = '';
+
 async function loadLrcFile(f) {
   try {
-    const text = await f.text();
+    legacyEnc = '';
+    const text = await readLrcText(f);
     const p = parseLrc(text);
     rawEntries = p.entries; meta = cleanMeta(p.meta);
     $('lrcInfo').textContent = f.name; $('lrcInfo').dataset.loaded = '1'; $('dropLrc').classList.add('ok');
     if (meta.ti) $('titleIn').value = meta.ti;
     if (meta.ar) $('artistIn').value = meta.ar;
     rebuildLines(); setPoster();
+    if (legacyEnc) setStatus(`한국어 인코딩(${legacyEnc})으로 읽었어요 · 가사 ${lines.length}줄`, 'good');
   } catch (e) { setStatus('가사 파일을 읽을 수 없어요.', 'err'); }
 }
 
